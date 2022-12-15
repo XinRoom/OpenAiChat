@@ -1,0 +1,1 @@
+docker run -d --name OpenAiChat  -v `pwd`:/OpenAiChat -w /OpenAiChat -p 8080:8080 python:3.9 bash /OpenAiChat/run_in_docker.sh

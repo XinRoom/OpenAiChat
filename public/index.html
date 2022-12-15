@@ -1,0 +1,165 @@
+<html class="dark">
+
+<head>
+    <!-- Import style -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-plus/dist/index.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-plus/theme-chalk/dark/css-vars.css" />
+    <!-- Import Vue 3 -->
+    <script src="https://cdn.jsdelivr.net/npm/vue@3"></script>
+    <!-- Import component library -->
+    <script src="https://cdn.jsdelivr.net/npm/element-plus/dist/index.full.min.js"></script>
+    <!-- <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script> -->
+
+    <title>Openai-Chat</title>
+</head>
+
+<body>
+    <div id="app">
+        <el-container style="height: 100%">
+            <el-main>
+                <el-scrollbar ref="scrollbarRef">
+                    <el-table :data="tableData" stripe style="width: 100%" :show-header="false">
+                        <el-table-column prop="who" label="Who" width="55"></el-table-column>
+                        <el-table-column prop="messages" label="Messages">
+                            <template #default="scope">
+                                <div v-html="scope.row.messages" style="white-space: pre-wrap;font-size: small;line-height: normal;"></div>
+                            </template>
+                        </el-table-column>
+                    </el-table>
+                </el-scrollbar>
+            </el-main>
+            <el-footer>
+                <el-row :gutter="24">
+                    <el-col :span="22">
+                        <el-input v-model="input" @keyup.enter="onGo" required="required" placeholder="Please input"
+                            clearable autosize />
+                    </el-col>
+                    <el-col :span="2">
+                        <el-button type="primary" @click="onGo">Go</el-button>
+                    </el-col>
+                </el-row>
+            </el-footer>
+        </el-container>
+    </div>
+
+    <script>
+        function u8arrayBufferToString(arr) {
+            if (typeof arr === 'string') {
+                return arr;
+            }
+            var str = '',
+                _arr = arr;
+            for (var i = 0; i < _arr.length; i++) {
+                var one = _arr[i].toString(2),
+                    v = one.match(/^1+?(?=0)/);
+                if (v && one.length == 8) {
+                    var bytesLength = v[0].length;
+                    var store = _arr[i].toString(2).slice(7 - bytesLength);
+                    for (var st = 1; st < bytesLength; st++) {
+                        store += _arr[st + i].toString(2).slice(2);
+                    }
+                    str += String.fromCharCode(parseInt(store, 2));
+                    i += bytesLength - 1;
+                } else {
+                    str += String.fromCharCode(_arr[i]);
+                }
+            }
+            return str;
+        }
+    </script>
+
+    <script>
+        // const {ref} = Vue;
+        let enCount = -1;
+        const errorStr = "<span style='color:red'>Error: </span>";
+        const App = {
+            data() {
+                return {
+                    input: "",
+                    tableData: [],
+                    canInput: true,
+                };
+            },
+            mounted() {
+                this.input = "你好"
+            },
+            methods: {
+                appendCurLine: function (value) {
+                    this.tableData[this.tableData.length - 1].messages += value;
+                },
+                appendBotLine: function (value, prefix = "") {
+                    if (this.tableData.length == 0 || this.tableData[this.tableData.length - 1].who == "I:") {
+                        this.tableData.push({ who: "Bot:", messages: prefix + value })
+                    } else {
+                        this.appendCurLine(value);
+                    }
+                },
+                readerHandle: function (reader, prefix = "", suffix = "") {
+                    return reader.read().then(({ value, done }) => {
+                        if (done) {
+                            // console.log('Read completed');
+                            this.appendCurLine(suffix);
+                            if (enCount < 2) this.appendCurLine("</b>");
+                            enCount = -1;
+                            this.canInput = true;
+                            return;
+                        }
+                        value = u8arrayBufferToString(value);
+                        // value = DOMPurify.sanitize(marked.parse(lineBuf));
+                        // value = DOMPurify.sanitize(lineBuf);
+                        if (prefix != errorStr && enCount < 2) {
+                            if (enCount == -1) {
+                                this.appendCurLine("<b>");
+                                enCount = 0;
+                            }
+
+                            let vs = value.split("\n\n");
+                            if (vs.length >= 2) {
+                                this.appendCurLine(vs[0]);
+                                this.appendBotLine(vs.slice(1).join("\n\n"), prefix);
+                                enCount = (vs.length - 1) * 2;
+                            } else {
+                                this.appendCurLine(value);
+                            }
+                            if (value.match(/\n/g) != null) enCount += value.match(/\n/g).length;
+                            if (enCount == 2) {
+                                this.appendCurLine("</b>");
+                                enCount++;
+                            }
+                        } else {
+                            this.appendBotLine(value, prefix)
+                        }
+                        this.$refs.scrollbarRef.setScrollTop(this.$refs.scrollbarRef.wrapRef.scrollHeight)
+                        return this.readerHandle(reader, prefix, suffix);
+                    });
+                },
+                onGo: function () {
+                    if (!this.canInput) { return }
+                    this.canInput = false
+                    this.tableData.push({ who: "I:", messages: this.input })
+                    fetch('chat', {
+                        method: 'POST',
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ prompt: this.input })
+                    }).then((res) => {
+                        if (res.status != 200) {
+                            this.readerHandle(res.body.getReader(), errorStr)
+                        } else {
+                            this.readerHandle(res.body.getReader(), "<pre style='white-space: pre-wrap'>", "</pre>")
+                        }
+                    }).catch((e) => {
+                        this.tableData.push({ who: "Bot:", messages: errorStr + e })
+                    });
+                    enCount = -1;
+                    this.canInput = true;
+                }
+            }
+        };
+        const app = Vue.createApp(App);
+        app.use(ElementPlus);
+        app.mount("#app");
+    </script>
+</body>
+
+</html>
